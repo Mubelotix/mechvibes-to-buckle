@@ -1,6 +1,7 @@
 use std::{collections::HashMap, process::Command};
 use progress_bar::{finalize_progress_bar, inc_progress_bar, init_progress_bar_with_eta};
 use serde::Deserialize;
+use string_tools::get_all_between_strict;
 
 #[derive(Deserialize, Clone)]
 struct SoundPackConfig {
@@ -29,36 +30,66 @@ impl std::fmt::Debug for SoundPackConfig {
 }
 
 fn main() {
-    let sound_pack = std::env::var("SOUND_PACK").unwrap_or("1200000000001".to_string());
-    
-    // Download config
-    let config_url = format!("https://mechvibes.com/sound-packs/sound-pack-{sound_pack}/dist/config.json");
-    let rep = minreq::get(config_url).send().expect("Failed to fetch config.json");
+    let url = "https://mechvibes.com/sound-packs/";
+    let rep = minreq::get(url).send().expect("Failed to fetch sound packs");
     if rep.status_code != 200 {
-        panic!("Failed to fetch config.json: {}", rep.status_code);
+        panic!("Failed to fetch sound packs: {}", rep.status_code);
     }
-    let body = rep.as_str().expect("Failed to read response body");
-    let config: SoundPackConfig = serde_json::from_str(body).expect("Failed to parse config.json");
-    println!("Config: {config:#?}");
-
-    // Download sound file
-    let sound_url = format!("https://mechvibes.com/sound-packs/sound-pack-{sound_pack}/dist/{}", config.sound);
-    let rep = minreq::get(sound_url).send().expect("Failed to fetch sound file");
-    if rep.status_code != 200 {
-        panic!("Failed to fetch sound file: {}", rep.status_code);
+    let mut body: &str = rep.as_str().expect("Failed to read response body");
+    let mut sound_packs = Vec::new();
+    while let Some(sound) = get_all_between_strict(body, "/sound-packs/", "\"") {
+        if !sound.is_empty() {
+            sound_packs.push(sound);
+        }
+        let body_idx = sound.as_ptr() as usize - body.as_ptr() as usize + sound.len();
+        body = &body[body_idx..];
     }
-    let body = rep.as_bytes();
-    std::fs::write(&config.sound, body).expect("Failed to write sound file");
+    println!("Sound packs: {:#?}", sound_packs);
+   
+    init_progress_bar_with_eta(sound_packs.len());
+    for sound_pack in sound_packs {
+        // Download config
+        let config_url = format!("https://mechvibes.com/sound-packs/{sound_pack}/dist/config.json");
+        let rep = minreq::get(config_url).send().expect("Failed to fetch config.json");
+        if rep.status_code != 200 {
+            println!("Failed to fetch config.json: {}", rep.status_code);
+            inc_progress_bar();
+            continue;
+        }
+        let body = rep.as_str().expect("Failed to read response body");
+        let config = match serde_json::from_str::<SoundPackConfig>(body) {
+            Ok(config) => config,
+            Err(e) => {
+                println!("Failed to parse config.json: {:#?}", e);
+                inc_progress_bar();
+                continue;
+            }
+        };
+        println!("Config: {config:#?}");
 
-    // Convert sounds
-    std::fs::create_dir(format!("pack-{sound_pack}")).unwrap_or_default();
-    init_progress_bar_with_eta(config.defines.len());
-    for (key, (start, duration)) in config.defines.iter() {        
-        let command = format!("sox {} pack-{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
-        Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
+        // Download sound file
+        let sound_url = format!("https://mechvibes.com/sound-packs/{sound_pack}/dist/{}", config.sound);
+        let rep = minreq::get(sound_url).send().expect("Failed to fetch sound file");
+        if rep.status_code != 200 {
+            panic!("Failed to fetch sound file: {}", rep.status_code);
+        }
+        let body = rep.as_bytes();
+        std::fs::write(&config.sound, body).expect("Failed to write sound file");
 
-        let command = format!("sox pack-{sound_pack}/{:02x}-stereo.wav -c 1 pack-{sound_pack}/{:02x}-1.wav", key, key);
-        Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
+        // Convert sounds
+        std::fs::create_dir(format!("pack-{sound_pack}")).unwrap_or_default();
+        for (key, (start, duration)) in config.defines.iter() {
+            // Extract sound
+            let command = format!("sox {} pack-{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
+            Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
+
+            // Convert to mono
+            let command = format!("sox pack-{sound_pack}/{:02x}-stereo.wav -c 1 pack-{sound_pack}/{:02x}-1.wav", key, key);
+            Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
+
+            // Remove stereo
+            std::fs::remove_file(format!("pack-{sound_pack}/{:02x}-stereo.wav", key)).unwrap_or_default();
+        }
 
         inc_progress_bar();
     }
