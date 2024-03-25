@@ -77,18 +77,18 @@ fn main() {
         std::fs::write(&config.sound, body).expect("Failed to write sound file");
 
         // Convert sounds
-        std::fs::create_dir(format!("pack-{sound_pack}")).unwrap_or_default();
+        std::fs::create_dir(format!("packs/{sound_pack}")).unwrap_or_default();
         for (key, (start, duration)) in config.defines.iter() {
             // Extract sound
-            let command = format!("sox {} pack-{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
+            let command = format!("sox {} packs/{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
             Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
 
             // Convert to mono
-            let command = format!("sox pack-{sound_pack}/{:02x}-stereo.wav -c 1 pack-{sound_pack}/{:02x}-1.wav", key, key);
+            let command = format!("sox packs/{sound_pack}/{:02x}-stereo.wav -c 1 packs/{sound_pack}/{:02x}-1.wav", key, key);
             Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
 
             // Remove stereo
-            std::fs::remove_file(format!("pack-{sound_pack}/{:02x}-stereo.wav", key)).unwrap_or_default();
+            std::fs::remove_file(format!("packs/{sound_pack}/{:02x}-stereo.wav", key)).unwrap_or_default();
         }
 
         inc_progress_bar();
