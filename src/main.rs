@@ -74,13 +74,13 @@ fn main() {
             panic!("Failed to fetch sound file: {}", rep.status_code);
         }
         let body = rep.as_bytes();
-        std::fs::write(&config.sound, body).expect("Failed to write sound file");
+        std::fs::write(format!("packs/{}", config.sound), body).expect("Failed to write sound file");
 
         // Convert sounds
         std::fs::create_dir(format!("packs/{sound_pack}")).unwrap_or_default();
         for (key, (start, duration)) in config.defines.iter() {
             // Extract sound
-            let command = format!("sox {} packs/{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
+            let command = format!("sox packs/{} packs/{sound_pack}/{:02x}-stereo.wav trim {:.03} {:.03}", config.sound, key, *start as f64 / 1000., *duration as f64 / 1000.);
             Command::new("/usr/bin/sh").arg("-c").arg(command).status().expect("Failed to run sox");
 
             // Convert to mono
